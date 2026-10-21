@@ -155,3 +155,39 @@ fn test_transfer_batch_resource_cost_baseline_and_linear_scaling() {
     assert!(cpu10 > cpu1);
     assert!(cpu10 < cpu1 * 15, "cost grows faster than linearly");
 }
+
+// ---- issue #528: transfer_batch event emission ----
+
+/// Every state change emits exactly one `transfer` event, including a
+/// repeated recipient, so indexers can rebuild activity from events alone.
+/// A self-transfer entry changes no balance but still emits its event, in the
+/// same `(amount, from_balance_after, to_balance_after)` shape.
+/// Event shape: topics `("transfer", from, to)`, data `(amount, new_from_bal,
+/// new_to_bal)`.
+#[test]
+fn test_transfer_batch_emits_one_event_per_entry_including_repeats_and_self() {
+    let s = setup(1_000);
+    let bob = Address::generate(&s.env);
+    allow(&s.env, &s.compliance, &s.admin, &bob);
+
+    let mut batch = Vec::new(&s.env);
+    batch.push_back((bob.clone(), 100i128));
+    batch.push_back((bob.clone(), 50i128));
+    batch.push_back((s.admin.clone(), 10i128));
+    s.token.transfer_batch(&s.admin, &batch);
+
+    // Read events before view calls, which would replace them.
+    assert_eq!(s.env.events().all().events().len(), 3);
+    assert_eq!(s.token.balance(&s.admin), 850);
+    assert_eq!(s.token.balance(&bob), 150);
+}
+
+/// A reverted batch publishes no events that persist, and an empty batch
+/// changes nothing and emits nothing.
+#[test]
+fn test_transfer_batch_empty_emits_no_events() {
+    let s = setup(1_000);
+    let empty: Vec<(Address, i128)> = Vec::new(&s.env);
+    s.token.transfer_batch(&s.admin, &empty);
+    assert_eq!(s.env.events().all().events().len(), 0);
+}
