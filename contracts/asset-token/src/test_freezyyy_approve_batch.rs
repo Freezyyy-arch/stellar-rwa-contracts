@@ -79,3 +79,44 @@ fn test_approve_open_to_unprivileged_self_authorised_caller() {
     // It did not touch the admin's allowance for the same spender.
     assert_eq!(s.token.allowance(&s.admin, &spender), 0);
 }
+
+// ---- issue #530: transfer_batch while paused / deactivated ----
+
+/// The token has no separate "deactivated" flag: `pause` is the only
+/// halt state. While paused, `transfer_batch` reverts deliberately with
+/// `Error::Paused` (#6), before any balance is touched.
+#[test]
+fn test_transfer_batch_rejected_when_paused_with_deliberate_error() {
+    let s = setup(1_000);
+    let bob = Address::generate(&s.env);
+    allow(&s.env, &s.compliance, &s.admin, &bob);
+    s.token.pause(&s.admin);
+
+    let mut batch = Vec::new(&s.env);
+    batch.push_back((bob.clone(), 100i128));
+    let res = s.token.try_transfer_batch(&s.admin, &batch);
+    assert_eq!(res, Err(Ok(Error::Paused)));
+    assert_eq!(s.token.balance(&s.admin), 1_000);
+    assert_eq!(s.token.balance(&bob), 0);
+}
+
+/// Pause is checked even for an empty batch, and unpausing restores service.
+#[test]
+fn test_transfer_batch_paused_empty_batch_and_unpause_restores() {
+    let s = setup(1_000);
+    let bob = Address::generate(&s.env);
+    allow(&s.env, &s.compliance, &s.admin, &bob);
+    s.token.pause(&s.admin);
+
+    let empty: Vec<(Address, i128)> = Vec::new(&s.env);
+    assert_eq!(
+        s.token.try_transfer_batch(&s.admin, &empty),
+        Err(Ok(Error::Paused))
+    );
+
+    s.token.unpause(&s.admin);
+    let mut batch = Vec::new(&s.env);
+    batch.push_back((bob.clone(), 100i128));
+    s.token.transfer_batch(&s.admin, &batch);
+    assert_eq!(s.token.balance(&bob), 100);
+}
