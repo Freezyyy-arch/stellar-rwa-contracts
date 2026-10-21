@@ -120,3 +120,38 @@ fn test_transfer_batch_paused_empty_batch_and_unpause_restores() {
     s.token.transfer_batch(&s.admin, &batch);
     assert_eq!(s.token.balance(&bob), 100);
 }
+
+// ---- issue #529: transfer_batch resource cost ----
+
+/// Measures CPU and memory for a batch of N entries and records a baseline
+/// ceiling. Cost is documented to scale linearly with the entry count (one
+/// cross-contract compliance call per entry). The ceilings are deliberately
+/// generous so the test flags order-of-magnitude regressions, not noise.
+///
+fn batch_cost(n: u32) -> (u64, u64) {
+    let s = setup(1_000_000);
+    let mut batch = Vec::new(&s.env);
+    for _ in 0..n {
+        let to = Address::generate(&s.env);
+        allow(&s.env, &s.compliance, &s.admin, &to);
+        batch.push_back((to, 1i128));
+    }
+    s.env.cost_estimate().budget().reset_default();
+    s.token.transfer_batch(&s.admin, &batch);
+    let b = s.env.cost_estimate().budget();
+    (b.cpu_instruction_cost(), b.memory_bytes_cost())
+}
+
+#[test]
+fn test_transfer_batch_resource_cost_baseline_and_linear_scaling() {
+    let (cpu1, mem1) = batch_cost(1);
+    let (cpu10, mem10) = batch_cost(10);
+
+    // Baseline ceilings (well under the 100M-instruction network limit).
+    assert!(cpu10 < 50_000_000, "n=10 cpu {cpu10} exceeds baseline");
+    assert!(mem10 < 20_000_000, "n=10 mem {mem10} exceeds baseline");
+    // More entries cost more, but sub-quadratically: 10 entries must cost
+    // well under 10x(+overhead) of one entry.
+    assert!(cpu10 > cpu1);
+    assert!(cpu10 < cpu1 * 15, "cost grows faster than linearly");
+}
