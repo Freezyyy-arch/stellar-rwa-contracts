@@ -102,6 +102,9 @@ pub enum Error {
     ValuationChangeTooLarge = 14,
 }
 
+#[cfg(test)]
+mod test_freezyyy_approve_batch;
+
 /// Maximum byte lengths for string metadata fields (issue #46).
 const MAX_NAME_LEN: u32 = 64;
 const MAX_SYMBOL_LEN: u32 = 16;
